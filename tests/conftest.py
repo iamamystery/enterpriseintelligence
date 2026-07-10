@@ -16,6 +16,7 @@ from app.database.postgres import get_db
 from app.main import app
 from app.models.organization import Organization
 from app.models.role import Role
+from app.models.source import Source
 from app.models.user import User
 
 TEST_DB_NAME = f"{settings.POSTGRES_DB}_test"
@@ -102,6 +103,18 @@ async def test_org(db_session: AsyncSession) -> Organization:
     db_session.add(org)
     await db_session.flush()
     return org
+
+
+@pytest_asyncio.fixture
+async def test_source(db_session: AsyncSession) -> Source:
+    source = Source(
+        name=f"test-source-{uuid.uuid4().hex[:8]}",
+        source_type="api",
+        base_url="https://example.com/api",
+    )
+    db_session.add(source)
+    await db_session.flush()
+    return source
 
 
 @pytest_asyncio.fixture

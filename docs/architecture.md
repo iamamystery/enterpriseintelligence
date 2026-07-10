@@ -190,20 +190,27 @@ an empty stub; no data-retention jobs exist yet.
 
 ## API surface
 
-Only a subset of the endpoint modules are actually wired into the router
-today (`app/api/v1/router.py` only includes `auth`, `users`, and
-`vulnerabilities`):
+`app/api/v1/router.py` wires up six of the ten endpoint modules today —
+`auth`, `users`, `organizations`, `roles`, `sources`, and `vulnerabilities`:
 
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
 - `POST /api/v1/users` (admin-only, requires `users:manage`)
+- `GET /api/v1/organizations/me` (any authenticated user, own org only)
+- `POST /api/v1/roles`, `GET /api/v1/roles`, `GET /api/v1/roles/{role_id}`
+  (require `roles:manage`/`roles:read`)
+- `GET /api/v1/sources`, `GET /api/v1/sources/{source_id}` (require `sources:read`)
 - `GET /api/v1/vulnerabilities`, `GET /api/v1/vulnerabilities/{cve_id}`
   (require `vulnerabilities:read`)
 - `GET /health` (unversioned, defined directly in `app/main.py`)
 
-`advisories.py`, `assets.py`, `organizations.py`, `roles.py`, `scrape_jobs.py`,
-`search.py`, and `sources.py` under `app/api/v1/endpoints/` are empty and not
-mounted — their corresponding models/schemas/repositories/services are mostly
-empty scaffolding as well. See `docs/api.md` for the current route reference.
+`advisories.py`, `assets.py`, `scrape_jobs.py`, and `search.py` under
+`app/api/v1/endpoints/` are still empty and not mounted — their backing
+models/schemas/repositories/services are mostly empty scaffolding too. See
+`docs/api.md` for the current route reference.
+
+Note that `Role` is a global table with no `organization_id` — creating a
+role via `POST /api/v1/roles` affects every organization in the system, not
+just the caller's own. See `docs/security.md` for the implication of this.
 
 ## Data model
 
@@ -222,17 +229,19 @@ for them exist in the migration history. Full schema in `docs/database.md`.
 **Working today**: config, JWT auth (register/login/refresh), permission-based
 authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
 four scraper integrations orchestrated by `ScrapingService`, four scheduled
-ingestion jobs, vulnerability list/search/get endpoints, five Alembic
-migrations, Docker Compose deployment.
+ingestion jobs, vulnerability list/search/get endpoints, organization/role/
+source read (and role-create) endpoints, five Alembic migrations, Docker
+Compose deployment.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
-middleware (request ID, request logging, error handling), most services
-(advisory, asset, organization, role, search, source), most repositories
-(asset, audit, scrape_job), the generic scraper base pipeline (cleaner,
-deduplicator, normalizer, parser, base_scraper), Celery integration, cleanup
-jobs, most API endpoint modules and their schemas, the `Advisory`/`Asset`/
-`AuditLog`/`ScrapeJob` models, and several utility modules (`filters.py`,
-`retry.py`, `search.py`, `timezone.py`, `validators.py`).
+middleware (request ID, request logging, error handling), the `advisory`,
+`asset`, and `search` services, the `asset`, `audit`, and `scrape_job`
+repositories, the generic scraper base pipeline (cleaner, deduplicator,
+normalizer, parser, base_scraper), Celery integration, cleanup jobs, the
+`advisories`/`assets`/`scrape_jobs`/`search` API endpoint modules and their
+schemas, the `Advisory`/`Asset`/`AuditLog`/`ScrapeJob` models, and several
+utility modules (`filters.py`, `retry.py`, `search.py`, `timezone.py`,
+`validators.py`).
 
 When extending ETIP, treat an existing-but-empty file as an intentional
 placeholder for where that logic belongs, not as dead code to remove.

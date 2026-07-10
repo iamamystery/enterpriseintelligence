@@ -52,13 +52,11 @@ dependency factory: it allows `is_superuser` users through unconditionally,
 otherwise requires `"*"` or the exact permission string to be present on the
 current user's role, else `403`.
 
-Two roles exist in practice today:
-- `admin` — created automatically on first registration with
-  `permissions: ["*"]` (see the registration flow below); the wildcard grants
-  every permission check.
-- Any other role (e.g. `analyst`) — created out-of-band (there's no `POST
-  /roles` endpoint yet; `roles.py` is an empty stub) and referenced by name
-  when an admin creates a user via `POST /api/v1/users`.
+The `admin` role is created automatically on first registration with
+`permissions: ["*"]` (see the registration flow below); the wildcard grants
+every permission check. Other roles (e.g. `analyst`) can now be created via
+`POST /api/v1/roles` (requires `roles:manage`) and referenced by name when
+an admin creates a user via `POST /api/v1/users`.
 
 Because permissions are just strings checked at each endpoint via
 `require_permission("resource:action")`, adding a new protected capability
@@ -66,6 +64,19 @@ means picking a permission string, calling `require_permission(...)` in the
 route, and making sure roles are granted that string — there's no central
 permission registry enforcing that route permissions and role permissions
 stay in sync.
+
+**Roles are global, not per-organization.** `Role` has no
+`organization_id` — it's a system-wide table, so `POST /api/v1/roles`
+creates a role visible to and assignable by every organization, not just
+the caller's. Combined with the wildcard permission model, this means any
+org's `admin` (`permissions: ["*"]`) can create or rename roles that affect
+every other tenant in the system — there's no tenant boundary on role
+management today. This is a pre-existing property of the data model (the
+`admin` role created at registration was already global before role
+management had an API), not something introduced by adding the endpoint,
+but it's worth fixing (e.g. scoping `Role` to an organization, or
+restricting `roles:manage` to a genuine superuser) before this is exposed
+to untrusted tenants.
 
 ## Registration flow: self-service registration only creates new organizations
 
@@ -158,3 +169,6 @@ gitignored. Only `.env.example` (placeholder values) is committed. See
 - No invite-token system yet — adding a user to an existing organization
   requires an existing admin to do it via `POST /api/v1/users`; there's no
   self-service "request to join" or email-verified invite link flow.
+- Roles are global, not tenant-scoped — any organization's `admin` can
+  create/see roles that affect every other organization via
+  `POST /api/v1/roles` (see "Roles are global" above).

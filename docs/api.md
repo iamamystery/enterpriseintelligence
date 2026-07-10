@@ -1,10 +1,10 @@
 # ETIP API Reference
 
-All routes below are implemented and mounted today. Several endpoint modules
-(`advisories`, `assets`, `organizations`, `roles`, `scrape_jobs`, `search`,
-`sources`) exist as empty files under `app/api/v1/endpoints/` and are not
-wired into the router yet — they are not documented here since they return
-nothing (they don't exist as routes at all).
+All routes below are implemented and mounted today. A few endpoint modules
+(`advisories`, `assets`, `scrape_jobs`, `search`) still exist as empty files
+under `app/api/v1/endpoints/` and are not wired into the router yet — they
+are not documented here since they return nothing (they don't exist as
+routes at all).
 
 Base URL: `/api/v1` (from `settings.API_V1_PREFIX`), plus one unversioned
 route (`/health`).
@@ -146,6 +146,108 @@ taken.
 
 ---
 
+## Organizations — `/api/v1/organizations`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth.
+
+### `GET /api/v1/organizations/me`
+
+Returns the requesting user's own organization. No permission beyond a
+valid token is required (there's no cross-tenant listing endpoint — a user
+can only ever see their own organization).
+
+**Response `200`** (`OrganizationRead`)
+```json
+{
+  "id": "uuid",
+  "name": "Acme Corp",
+  "slug": "acme-corp",
+  "created_at": "2026-07-10T00:00:00Z"
+}
+```
+
+---
+
+## Roles — `/api/v1/roles`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth.
+**Roles are global, not scoped per organization** — creating a role affects
+every organization in the system (see `docs/security.md` for the
+implication).
+
+### `POST /api/v1/roles`
+
+Requires the `roles:manage` permission (or superuser). Rejects a duplicate
+`name` with `409 AlreadyExistsError`. `permissions` is a free-form list of
+strings (there's no central registry validating these against what
+endpoints actually check).
+
+**Request body** (`RoleCreate`)
+```json
+{"name": "analyst", "permissions": ["vulnerabilities:read", "sources:read"]}
+```
+
+**Response `201`** (`RoleRead`)
+```json
+{
+  "id": "uuid",
+  "name": "analyst",
+  "permissions": ["vulnerabilities:read", "sources:read"],
+  "created_at": "2026-07-10T00:00:00Z"
+}
+```
+
+### `GET /api/v1/roles`
+
+Requires the `roles:read` permission (or superuser). Returns all roles,
+ordered by name (no pagination — role counts are expected to stay small).
+
+**Response `200`**: `list[RoleRead]`
+
+### `GET /api/v1/roles/{role_id}`
+
+Requires the `roles:read` permission (or superuser). Returns
+`404 NotFoundError` if no role with that ID exists.
+
+**Response `200`** (`RoleRead`)
+
+---
+
+## Sources — `/api/v1/sources`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth. Sources
+are populated automatically by the scraper ingestion jobs (see
+`docs/architecture.md`) — there's no create/update route; this is a
+read-only view of what's been ingested from.
+
+### `GET /api/v1/sources`
+
+Requires the `sources:read` permission (or superuser). Returns all sources,
+ordered by name (no pagination — source counts are expected to stay small,
+today: NVD, CISA-KEV, MITRE, RedHat).
+
+**Response `200`**: `list[SourceRead]`
+```json
+[
+  {
+    "id": "uuid",
+    "name": "NVD",
+    "source_type": "api",
+    "base_url": "https://services.nvd.nist.gov/rest/json/cves/2.0",
+    "created_at": "2026-07-10T00:00:00Z"
+  }
+]
+```
+
+### `GET /api/v1/sources/{source_id}`
+
+Requires the `sources:read` permission (or superuser). Returns
+`404 NotFoundError` if no source with that ID exists.
+
+**Response `200`** (`SourceRead`)
+
+---
+
 ## Vulnerabilities — `/api/v1/vulnerabilities`
 
 Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
@@ -223,6 +325,6 @@ job has processed it, and so on. Any unset field is `null`.
 ## Not yet available
 
 The following are referenced by directory/file names in the codebase but have
-no working routes yet: advisories, assets, organizations, roles,
-scrape job status, and free-text/cross-entity search. See
-`docs/architecture.md` for the full list of scaffolded-but-empty modules.
+no working routes yet: advisories, assets, scrape job status, and
+free-text/cross-entity search. See `docs/architecture.md` for the full list
+of scaffolded-but-empty modules.
