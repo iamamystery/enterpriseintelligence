@@ -135,31 +135,52 @@ One row per run of a scheduled ingestion job (see `docs/architecture.md`
 | items_processed | integer nullable | set on success |
 | error_message | text nullable | set on failure, `"<ExceptionType>: <message>"` |
 
+**`advisories`**
+
+A vendor/authority security bulletin — distinct from `vulnerabilities`,
+which is one row per enriched CVE. Resource-layer only today: rows are
+created via `POST /api/v1/advisories`, not by any scraper yet.
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| created_at / updated_at | timestamptz | |
+| advisory_id | varchar(50) | unique, indexed; e.g. `ICSA-24-123-01`, `RHSA-2024:1234` |
+| title | varchar(500) | |
+| summary | text | |
+| url | varchar(1024) nullable | |
+| published_date | timestamptz nullable | |
+| cve_ids | text[] | default `[]`; plain strings, not validated against `vulnerabilities` |
+| source_id | UUID FK → sources.id | |
+
 ### Relationships
 
 ```
 Organization 1---N User
 Role         1---N User
 Source       1---N Vulnerability
+Source       1---N Advisory
 ```
 
 `Organization` and `Role` are both referenced from `User`
-(`organization_id`, `role_id`); `Vulnerability` references `Source`
-(`source_id`). `scrape_jobs` has no foreign keys — it's identified only by
-`job_name`, a free-form string matching the APScheduler job IDs in
-`app/tasks/scheduler.py`, not a FK to a job-definitions table. There is no
-many-to-many anywhere in the current schema.
+(`organization_id`, `role_id`); `Vulnerability` and `Advisory` both
+reference `Source` (`source_id`). `scrape_jobs` has no foreign keys — it's
+identified only by `job_name`, a free-form string matching the APScheduler
+job IDs in `app/tasks/scheduler.py`, not a FK to a job-definitions table.
+`Advisory.cve_ids` is a plain string array, not a foreign key or join
+table — there is no enforced many-to-many between advisories and
+vulnerabilities (an advisory can reference a `cve_id` that doesn't exist,
+or doesn't exist yet, in `vulnerabilities`).
 
-Three model files exist but define no table and aren't imported anywhere
-(not part of any migration): `app/models/advisory.py`, `asset.py`,
-`audit_log.py`. Treat these as placeholders for future schema, not dead
-code.
+Two model files exist but define no table and aren't imported anywhere
+(not part of any migration): `app/models/asset.py`, `audit_log.py`. Treat
+these as placeholders for future schema, not dead code.
 
 ### Migrations (Alembic)
 
 `alembic/env.py` imports `app.models` (to populate `Base.metadata` for
 autogenerate) and falls back to `settings.SYNC_DATABASE_URL` when
-`alembic.ini` has no `sqlalchemy.url` configured. Six migrations exist
+`alembic.ini` has no `sqlalchemy.url` configured. Seven migrations exist
 today, forming one linear chain (no branches):
 
 1. `365455051ed7` — create `organizations`, `roles`, `users`
@@ -168,11 +189,11 @@ today, forming one linear chain (no branches):
 4. `684afb0c8c71` — add MITRE metadata columns to `vulnerabilities`
 5. `837408e55466` — add Red Hat enrichment columns to `vulnerabilities`
 6. `905078e87c24` — create `scrape_jobs`
+7. `9d684da259bc` — create `advisories`
 
 Migrations 1–5 mirror the "enrich in place" design: each new scraper
 integration ships as a migration adding columns to `vulnerabilities` rather
-than a new joined table. Migration 6 is the first genuinely new table since
-migration 2.
+than a new joined table. Migrations 6 and 7 are genuinely new tables.
 
 **Running migrations**: `alembic upgrade head` (run automatically on
 container start in `docker-compose.yml`, before `uvicorn` starts).
@@ -203,6 +224,10 @@ wrappers — no shared base repository class):
 - `ScrapeJobRepository` — `create`, `get_by_id`,
   `list_recent(job_name=None, limit, offset) -> (items, total_count)`
   (ordered `started_at` descending)
+- `AdvisoryRepository` — `create`, `get_by_id` (internal UUID),
+  `get_by_advisory_id` (external string ID, used by the API detail route),
+  `list_recent(source_id=None, limit, offset) -> (items, total_count)`
+  (ordered `published_date` descending, nulls last)
 
 `asset_repository.py` and `audit_repository.py` exist but are empty — no
 code, since their backing tables don't exist yet.

@@ -1,7 +1,7 @@
 # ETIP API Reference
 
-All routes below are implemented and mounted today. A few endpoint modules
-(`advisories`, `assets`, `search`) still exist as empty files under
+All routes below are implemented and mounted today. Two endpoint modules
+(`assets`, `search`) still exist as empty files under
 `app/api/v1/endpoints/` and are not wired into the router yet — they are not
 documented here since they return nothing (they don't exist as routes at
 all).
@@ -310,6 +310,82 @@ Returns `404 NotFoundError` if no job with that ID exists.
 
 ---
 
+## Advisories — `/api/v1/advisories`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth.
+Resource-layer only today — there's no scraper populating this table yet
+(unlike `sources`/`vulnerabilities`), so rows only exist if created via
+`POST /api/v1/advisories`. See `docs/architecture.md` for the planned
+CISA advisory-feed scraper that would eventually populate this
+automatically.
+
+An `Advisory` represents a vendor/authority security bulletin (e.g. a CISA
+ICS advisory, a Red Hat RHSA) — distinct from a `Vulnerability`, which is a
+single enriched CVE record. One advisory can reference multiple CVEs via
+`cve_ids` (a plain list of strings, not validated against existing
+`vulnerabilities` rows — same convention as `Vulnerability.references`).
+
+### `POST /api/v1/advisories`
+
+Requires the `advisories:manage` permission (or superuser). Rejects a
+duplicate `advisory_id` with `409 AlreadyExistsError`, and an unknown
+`source_id` with `404 NotFoundError`.
+
+**Request body** (`AdvisoryCreate`)
+```json
+{
+  "advisory_id": "ICSA-24-123-01",
+  "title": "Critical vulnerability in Acme Widget",
+  "summary": "An attacker could exploit this to gain remote code execution.",
+  "url": "https://www.cisa.gov/ICSA-24-123-01",
+  "published_date": "2026-07-10T00:00:00Z",
+  "cve_ids": ["CVE-2024-12345"],
+  "source_id": "uuid"
+}
+```
+
+**Response `201`** (`AdvisoryRead`)
+```json
+{
+  "id": "uuid",
+  "advisory_id": "ICSA-24-123-01",
+  "title": "Critical vulnerability in Acme Widget",
+  "summary": "An attacker could exploit this to gain remote code execution.",
+  "url": "https://www.cisa.gov/ICSA-24-123-01",
+  "published_date": "2026-07-10T00:00:00Z",
+  "cve_ids": ["CVE-2024-12345"],
+  "source_id": "uuid",
+  "created_at": "2026-07-10T00:00:00Z"
+}
+```
+
+### `GET /api/v1/advisories`
+
+Requires the `advisories:read` permission (or superuser). Paginated,
+optionally filtered by `source_id`, newest `published_date` first (nulls
+last).
+
+**Query parameters**
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `page` | int | 1 | 1-indexed, `ge=1` |
+| `page_size` | int | 20 | `ge=1, le=100` |
+| `source_id` | uuid | — | filter to advisories from one source |
+
+**Response `200`**: `Page[AdvisoryRead]`
+
+### `GET /api/v1/advisories/{advisory_id}`
+
+Looked up by the external `advisory_id` string (e.g. `ICSA-24-123-01`),
+**not** the internal UUID — same convention as
+`GET /vulnerabilities/{cve_id}`. Returns `404 NotFoundError` if no advisory
+with that ID exists.
+
+**Response `200`** (`AdvisoryRead`)
+
+---
+
 ## Vulnerabilities — `/api/v1/vulnerabilities`
 
 Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
@@ -387,6 +463,5 @@ job has processed it, and so on. Any unset field is `null`.
 ## Not yet available
 
 The following are referenced by directory/file names in the codebase but have
-no working routes yet: advisories, assets, and free-text/cross-entity
-search. See `docs/architecture.md` for the full list of scaffolded-but-empty
-modules.
+no working routes yet: assets and free-text/cross-entity search. See
+`docs/architecture.md` for the full list of scaffolded-but-empty modules.

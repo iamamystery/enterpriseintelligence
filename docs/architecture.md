@@ -154,7 +154,11 @@ Each source is a self-contained module with a client and a mapper:
 - **CISA KEV** (`app/scrapers/cisa/`) — `CISAKEVClient.fetch_catalog`; mapper
   sets `is_known_exploited`, `kev_date_added`, `kev_due_date`,
   `ransomware_campaign_use`. (`advisory_feed.py` in this package is an empty,
-  unimplemented stub.)
+  unimplemented stub — it would be the natural place to add a scraper for
+  CISA's general advisory feed, which could then call
+  `POST /api/v1/advisories` / `AdvisoryService.create_advisory` to
+  auto-populate the `advisories` table the same way the other four scrapers
+  populate `vulnerabilities` today.)
 - **MITRE** (`app/scrapers/mitre/`) — `MITREClient.fetch_cve`; mapper parses
   the CVE 5.x JSON schema (`containers.cna`/`containers.adp`) for CVSS and
   MITRE-specific metadata (`cve_state`, `assigner_org`, `date_reserved`).
@@ -201,9 +205,9 @@ nothing prunes old rows.
 
 ## API surface
 
-`app/api/v1/router.py` wires up seven of the ten endpoint modules today —
-`auth`, `users`, `organizations`, `roles`, `sources`, `scrape_jobs`, and
-`vulnerabilities`:
+`app/api/v1/router.py` wires up eight of the ten endpoint modules today —
+`auth`, `users`, `organizations`, `roles`, `sources`, `scrape_jobs`,
+`advisories`, and `vulnerabilities`:
 
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
 - `POST /api/v1/users` (admin-only, requires `users:manage`)
@@ -213,14 +217,23 @@ nothing prunes old rows.
 - `GET /api/v1/sources`, `GET /api/v1/sources/{source_id}` (require `sources:read`)
 - `GET /api/v1/scrape-jobs`, `GET /api/v1/scrape-jobs/{scrape_job_id}`
   (require `scrape_jobs:read`)
+- `POST /api/v1/advisories`, `GET /api/v1/advisories`,
+  `GET /api/v1/advisories/{advisory_id}` (require `advisories:manage`/`advisories:read`)
 - `GET /api/v1/vulnerabilities`, `GET /api/v1/vulnerabilities/{cve_id}`
   (require `vulnerabilities:read`)
 - `GET /health` (unversioned, defined directly in `app/main.py`)
 
-`advisories.py`, `assets.py`, and `search.py` under `app/api/v1/endpoints/`
-are still empty and not mounted — their backing models/schemas/repositories/
-services are mostly empty scaffolding too. See `docs/api.md` for the current
-route reference.
+`assets.py` and `search.py` under `app/api/v1/endpoints/` are still empty
+and not mounted — their backing models/schemas/repositories/services are
+mostly empty scaffolding too. See `docs/api.md` for the current route
+reference.
+
+Unlike `sources`/`scrape_jobs`, nothing populates `advisories`
+automatically yet — it's a resource layer only (create/list/get), with
+rows appearing only via `POST /api/v1/advisories`. The CISA advisory feed
+(`app/scrapers/cisa/advisory_feed.py`, still empty) would be the natural
+scraper to eventually auto-populate it, mirroring how `ScrapingService`
+populates `vulnerabilities`.
 
 Note that `Role` is a global table with no `organization_id` — creating a
 role via `POST /api/v1/roles` affects every organization in the system, not
@@ -228,18 +241,23 @@ just the caller's own. See `docs/security.md` for the implication of this.
 
 ## Data model
 
-Six models are registered with SQLAlchemy today (`app/models/__init__.py`):
-`Organization`, `Role`, `User`, `Source`, `Vulnerability`, `ScrapeJob`. All
-use a shared `UUIDMixin` (UUID primary key) and `TimestampMixin`
-(`created_at`/`updated_at`) from `app/database/base.py`. `Vulnerability` is
-deliberately a single wide table that accumulates enrichment columns from
-each source (KEV fields, MITRE metadata, Red Hat severity) rather than
-per-source tables — the Alembic migrations mirror this, one per source
-integration. `ScrapeJob` records one run of one scheduled ingestion job
-(`job_name`, `status`, `started_at`/`finished_at`, `items_processed`,
-`error_message`) — see "Background jobs" above. `Advisory`, `Asset`, and
-`AuditLog` model files exist but are empty; no tables for them exist in the
-migration history. Full schema in `docs/database.md`.
+Seven models are registered with SQLAlchemy today (`app/models/__init__.py`):
+`Organization`, `Role`, `User`, `Source`, `Vulnerability`, `ScrapeJob`,
+`Advisory`. All use a shared `UUIDMixin` (UUID primary key) and
+`TimestampMixin` (`created_at`/`updated_at`) from `app/database/base.py`.
+`Vulnerability` is deliberately a single wide table that accumulates
+enrichment columns from each source (KEV fields, MITRE metadata, Red Hat
+severity) rather than per-source tables — the Alembic migrations mirror
+this, one per source integration. `ScrapeJob` records one run of one
+scheduled ingestion job (`job_name`, `status`, `started_at`/`finished_at`,
+`items_processed`, `error_message`) — see "Background jobs" above.
+`Advisory` represents a vendor/authority security bulletin (`advisory_id`,
+`title`, `summary`, `url`, `published_date`, a plain `cve_ids: list[str]`
+rather than a join table, and a `source_id` FK) — distinct from
+`Vulnerability`, which is a single enriched CVE record; one advisory can
+span multiple CVEs. `Asset` and `AuditLog` model files exist but are empty;
+no tables for them exist in the migration history. Full schema in
+`docs/database.md`.
 
 ## What's implemented vs. scaffolded
 
@@ -247,16 +265,18 @@ migration history. Full schema in `docs/database.md`.
 authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
 four scraper integrations orchestrated by `ScrapingService`, four scheduled
 ingestion jobs with tracked run history, vulnerability list/search/get
-endpoints, organization/role/source/scrape-job read (and role-create)
-endpoints, six Alembic migrations, Docker Compose deployment.
+endpoints, organization/role/source/scrape-job/advisory endpoints (create +
+read, except organizations which is read-only), seven Alembic migrations,
+Docker Compose deployment.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
-middleware (request ID, request logging, error handling), the `advisory`,
-`asset`, and `search` services, the `asset` and `audit` repositories, the
-generic scraper base pipeline (cleaner, deduplicator, normalizer, parser,
-base_scraper), Celery integration, cleanup jobs (so `scrape_jobs` history
-grows unbounded), the `advisories`/`assets`/`search` API endpoint modules
-and their schemas, the `Advisory`/`Asset`/`AuditLog` models, and several
+middleware (request ID, request logging, error handling), the `asset` and
+`search` services, the `asset` and `audit` repositories, the generic scraper
+base pipeline (cleaner, deduplicator, normalizer, parser, base_scraper), a
+CISA advisory-feed scraper to auto-populate `advisories` (currently
+create-only via the API), Celery integration, cleanup jobs (so
+`scrape_jobs` history grows unbounded), the `assets`/`search` API endpoint
+modules and their schemas, the `Asset`/`AuditLog` models, and several
 utility modules (`filters.py`, `retry.py`, `search.py`, `timezone.py`,
 `validators.py`).
 

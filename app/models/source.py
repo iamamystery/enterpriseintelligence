@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.advisory import Advisory
     from app.models.vulnerability import Vulnerability
 
 
@@ -17,3 +18,4 @@ class Source(UUIDMixin, TimestampMixin, Base):
     base_url: Mapped[str] = mapped_column(String(512), nullable=False)
 
     vulnerabilities: Mapped[list["Vulnerability"]] = relationship(back_populates="source")
+    advisories: Mapped[list["Advisory"]] = relationship(back_populates="source")
