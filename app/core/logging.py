@@ -1,6 +1,9 @@
 import logging.config
+from pathlib import Path
 
 from app.core.config import settings
+
+LOG_DIR = Path("logs")
 
 LOGGING_CONFIG = {
     "version": 1,
@@ -20,7 +23,7 @@ LOGGING_CONFIG = {
         "file": {
             "class": "logging.handlers.RotatingFileHandler",
             "formatter": "default",
-            "filename": "logs/etip.log",
+            "filename": str(LOG_DIR / "etip.log"),
             "maxBytes": 10_485_760,
             "backupCount": 5,
         },
@@ -33,4 +36,5 @@ LOGGING_CONFIG = {
 
 
 def configure_logging() -> None:
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
     logging.config.dictConfig(LOGGING_CONFIG)
