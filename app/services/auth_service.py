@@ -36,11 +36,14 @@ class AuthService:
             raise AlreadyExistsError(f"A user with email '{data.email}' already exists")
 
         slug = slugify(data.organization_name)
-        organization = await self.organizations.get_by_slug(slug)
-        if organization is None:
-            organization = await self.organizations.create(
-                Organization(name=data.organization_name, slug=slug)
+        if await self.organizations.get_by_slug(slug) is not None:
+            raise AlreadyExistsError(
+                f"An organization named '{data.organization_name}' already exists. "
+                "Ask an administrator of that organization to create an account for you."
             )
+        organization = await self.organizations.create(
+            Organization(name=data.organization_name, slug=slug)
+        )
 
         role = await self.roles.get_by_name(DEFAULT_ADMIN_ROLE_NAME)
         if role is None:

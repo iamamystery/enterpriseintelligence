@@ -22,8 +22,8 @@ async def test_register_creates_organization_role_and_user(db_session: AsyncSess
     assert user.role_id is not None
 
 
-async def test_register_reuses_existing_organization_by_slug(db_session: AsyncSession):
-    first = await AuthService(db_session).register(
+async def test_register_rejects_duplicate_organization_name(db_session: AsyncSession):
+    await AuthService(db_session).register(
         UserRegister(
             email="founder@example.com",
             password="correcthorsebattery",
@@ -31,16 +31,39 @@ async def test_register_reuses_existing_organization_by_slug(db_session: AsyncSe
             organization_name="Shared Org",
         )
     )
-    second = await AuthService(db_session).register(
+
+    with pytest.raises(AlreadyExistsError):
+        await AuthService(db_session).register(
+            UserRegister(
+                email="teammate@example.com",
+                password="correcthorsebattery",
+                full_name="Teammate",
+                organization_name="Shared Org",
+            )
+        )
+
+
+async def test_register_rejects_organization_name_that_slugifies_to_existing_slug(
+    db_session: AsyncSession,
+):
+    await AuthService(db_session).register(
         UserRegister(
-            email="teammate@example.com",
+            email="founder2@example.com",
             password="correcthorsebattery",
-            full_name="Teammate",
-            organization_name="Shared Org",
+            full_name="Founder",
+            organization_name="Shared Org!!",
         )
     )
 
-    assert second.organization_id == first.organization_id
+    with pytest.raises(AlreadyExistsError):
+        await AuthService(db_session).register(
+            UserRegister(
+                email="impersonator@example.com",
+                password="correcthorsebattery",
+                full_name="Impersonator",
+                organization_name="  shared   org  ",
+            )
+        )
 
 
 async def test_register_duplicate_email_raises(db_session: AsyncSession):

@@ -48,12 +48,17 @@ Rate limit: `AUTH_RATE_LIMIT_PER_MINUTE` (default 5/min).
 
 ### `POST /api/v1/auth/register`
 
-Creates a new user. `organization_name` is slugified and looked up first —
-if an organization with that slug already exists, the new user joins it;
-otherwise a new `Organization` is created. If no "admin" role exists yet, it
-is created with `permissions: ["*"]`, and the new user is assigned it (see
-`docs/security.md` for the implication of this on organizations with a
-reused name). Rejects duplicate emails with `409 AlreadyExistsError`.
+Creates a new user **and a brand-new organization** — self-service
+registration always creates an organization; it never joins an existing
+one. `organization_name` is slugified and looked up first; if an
+organization with that slug already exists, the request is rejected with
+`409 AlreadyExistsError` ("... Ask an administrator of that organization to
+create an account for you."). Otherwise a new `Organization` is created and
+the new user becomes its first `admin` (`permissions: ["*"]`). Also rejects
+duplicate emails with `409 AlreadyExistsError`. To add a user to an
+*existing* organization, an admin of that organization must use
+`POST /api/v1/users` instead (see below) — see `docs/security.md` for the
+full registration/authorization model.
 
 **Request body** (`UserRegister`)
 ```json

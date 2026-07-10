@@ -67,19 +67,29 @@ route, and making sure roles are granted that string — there's no central
 permission registry enforcing that route permissions and role permissions
 stay in sync.
 
-## Registration flow: organizations are reused by slug
+## Registration flow: self-service registration only creates new organizations
 
 `AuthService.register` (`app/services/auth_service.py`) slugifies
 `data.organization_name` and calls `OrganizationRepository.get_by_slug`
-first; if an organization with that slug already exists, the new user joins
-it instead of a new row being inserted. This means anyone registering with
-an `organization_name` that slugifies to the same value as an existing
-organization becomes a member of that same organization (with the default
-`admin` role, `permissions: ["*"]` — there's no invite/approval step, so in
-practice the first person to register a given organization name and anyone
-who later reuses that exact name all get full admin access to it). Covered
-by `test_register_reuses_existing_organization_by_slug` in
-`tests/services/test_auth_service.py`.
+first. If an organization with that slug already exists, registration is
+**rejected** with `409 AlreadyExistsError` ("An organization named '...'
+already exists. Ask an administrator of that organization to create an
+account for you.") — self-registration never joins an existing
+organization, and it never grants admin access on one. A new `Organization`
+row (and its first `admin` user, with `permissions: ["*"]`) is only created
+when the slugified name is unused.
+
+Joining an *existing* organization is only possible via the admin-only
+`POST /api/v1/users` endpoint (`users:manage` permission required), which
+adds the new user to the requesting admin's own `organization_id` — so
+membership in an existing org always requires action by one of its current
+admins, never just knowing/guessing its name.
+
+Covered by `test_register_rejects_duplicate_organization_name` and
+`test_register_rejects_organization_name_that_slugifies_to_existing_slug` in
+`tests/services/test_auth_service.py` (the latter checks that names which
+differ only in case/punctuation/whitespace, e.g. `"Shared Org!!"` vs.
+`"  shared   org  "`, both resolve to the same slug and are still rejected).
 
 ## Rate limiting
 
@@ -145,8 +155,6 @@ gitignored. Only `.env.example` (placeholder values) is committed. See
   not currently recorded anywhere queryable.
 - No account lockout after repeated failed logins beyond the general auth
   rate limit.
-- Self-service registration grants full admin (`permissions: ["*"]`) on
-  whichever organization the slug resolves to, with no invite/approval
-  step — anyone who registers with a name that slugifies to an existing
-  organization's slug joins that organization as an admin (see the
-  registration flow above).
+- No invite-token system yet — adding a user to an existing organization
+  requires an existing admin to do it via `POST /api/v1/users`; there's no
+  self-service "request to join" or email-verified invite link flow.
