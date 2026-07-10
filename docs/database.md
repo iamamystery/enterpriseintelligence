@@ -119,6 +119,22 @@ source, rather than one table per source:
 | redhat_statement | text nullable | |
 | source_id | UUID FK → sources.id | |
 
+**`scrape_jobs`**
+
+One row per run of a scheduled ingestion job (see `docs/architecture.md`
+"Background jobs"):
+
+| Column | Type | Notes |
+|---|---|---|
+| id | UUID PK | |
+| created_at / updated_at | timestamptz | |
+| job_name | varchar(100) | indexed; e.g. `nvd_ingestion`, `mitre_backfill` |
+| status | varchar(20) | `running`, `success`, or `failed` |
+| started_at | timestamptz | |
+| finished_at | timestamptz nullable | set when the run completes |
+| items_processed | integer nullable | set on success |
+| error_message | text nullable | set on failure, `"<ExceptionType>: <message>"` |
+
 ### Relationships
 
 ```
@@ -129,18 +145,21 @@ Source       1---N Vulnerability
 
 `Organization` and `Role` are both referenced from `User`
 (`organization_id`, `role_id`); `Vulnerability` references `Source`
-(`source_id`). There is no many-to-many anywhere in the current schema.
+(`source_id`). `scrape_jobs` has no foreign keys — it's identified only by
+`job_name`, a free-form string matching the APScheduler job IDs in
+`app/tasks/scheduler.py`, not a FK to a job-definitions table. There is no
+many-to-many anywhere in the current schema.
 
-Four model files exist but define no table and aren't imported anywhere
+Three model files exist but define no table and aren't imported anywhere
 (not part of any migration): `app/models/advisory.py`, `asset.py`,
-`audit_log.py`, `scrape_job.py`. Treat these as placeholders for future
-schema, not dead code.
+`audit_log.py`. Treat these as placeholders for future schema, not dead
+code.
 
 ### Migrations (Alembic)
 
 `alembic/env.py` imports `app.models` (to populate `Base.metadata` for
 autogenerate) and falls back to `settings.SYNC_DATABASE_URL` when
-`alembic.ini` has no `sqlalchemy.url` configured. Five migrations exist
+`alembic.ini` has no `sqlalchemy.url` configured. Six migrations exist
 today, forming one linear chain (no branches):
 
 1. `365455051ed7` — create `organizations`, `roles`, `users`
@@ -148,10 +167,12 @@ today, forming one linear chain (no branches):
 3. `90a34578c5c1` — add CISA KEV enrichment columns to `vulnerabilities`
 4. `684afb0c8c71` — add MITRE metadata columns to `vulnerabilities`
 5. `837408e55466` — add Red Hat enrichment columns to `vulnerabilities`
+6. `905078e87c24` — create `scrape_jobs`
 
-This history mirrors the "enrich in place" design: each new scraper
+Migrations 1–5 mirror the "enrich in place" design: each new scraper
 integration ships as a migration adding columns to `vulnerabilities` rather
-than a new joined table.
+than a new joined table. Migration 6 is the first genuinely new table since
+migration 2.
 
 **Running migrations**: `alembic upgrade head` (run automatically on
 container start in `docker-compose.yml`, before `uvicorn` starts).
@@ -162,9 +183,9 @@ container start in `docker-compose.yml`, before `uvicorn` starts).
 (constructor takes an `AsyncSession`, methods are `select()` + `execute()`
 wrappers — no shared base repository class):
 
-- `OrganizationRepository` — `get_by_slug`, `create`
-- `RoleRepository` — `get_by_name`, `create`
-- `SourceRepository` — `get_by_name`, `create`
+- `OrganizationRepository` — `get_by_id`, `get_by_slug`, `create`
+- `RoleRepository` — `get_by_id`, `get_by_name`, `list_all`, `create`
+- `SourceRepository` — `get_by_id`, `get_by_name`, `list_all`, `create`
 - `UserRepository` — `get_by_id` (eager-loads `.role` via `selectinload`),
   `get_by_email`, `create`
 - `VulnerabilityRepository` — the most complex one:
@@ -179,9 +200,12 @@ wrappers — no shared base repository class):
     `cve_state IS NULL`, used to drive the MITRE backfill job
   - `create` / `upsert` (upsert looks up by `cve_id`, overwrites mutable
     enrichment fields on the existing row or inserts a new one)
+- `ScrapeJobRepository` — `create`, `get_by_id`,
+  `list_recent(job_name=None, limit, offset) -> (items, total_count)`
+  (ordered `started_at` descending)
 
-`asset_repository.py`, `audit_repository.py`, and `scrape_job_repository.py`
-exist but are empty — no code, since their backing tables don't exist yet.
+`asset_repository.py` and `audit_repository.py` exist but are empty — no
+code, since their backing tables don't exist yet.
 
 ## MongoDB
 

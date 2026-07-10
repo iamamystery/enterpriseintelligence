@@ -1,10 +1,10 @@
 # ETIP API Reference
 
 All routes below are implemented and mounted today. A few endpoint modules
-(`advisories`, `assets`, `scrape_jobs`, `search`) still exist as empty files
-under `app/api/v1/endpoints/` and are not wired into the router yet — they
-are not documented here since they return nothing (they don't exist as
-routes at all).
+(`advisories`, `assets`, `search`) still exist as empty files under
+`app/api/v1/endpoints/` and are not wired into the router yet — they are not
+documented here since they return nothing (they don't exist as routes at
+all).
 
 Base URL: `/api/v1` (from `settings.API_V1_PREFIX`), plus one unversioned
 route (`/health`).
@@ -248,6 +248,68 @@ Requires the `sources:read` permission (or superuser). Returns
 
 ---
 
+## Scrape jobs — `/api/v1/scrape-jobs`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
+`scrape_jobs:read` permission (or superuser) on both routes. Read-only —
+rows are created and updated only by the scheduled ingestion tasks
+themselves (see `docs/architecture.md`), never via the API.
+
+Each row represents one run of one of the four scheduled ingestion jobs
+(`nvd_ingestion`, `cisa_kev_ingestion`, `redhat_ingestion`,
+`mitre_backfill`) — a `running` row is inserted when the job starts, then
+updated to `success` (with `items_processed`) or `failed` (with
+`error_message`) when it finishes. This is what gives operational
+visibility into whether scheduled ingestion is actually working — before
+this existed, a failing scraper only showed up in application logs.
+
+### `GET /api/v1/scrape-jobs`
+
+Paginated, optionally filtered by `job_name`, newest first.
+
+**Query parameters**
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `page` | int | 1 | 1-indexed, `ge=1` |
+| `page_size` | int | 20 | `ge=1, le=100` |
+| `job_name` | string | — | exact match, e.g. `nvd_ingestion` |
+
+**Response `200`** (`Page[ScrapeJobRead]`)
+```json
+{
+  "items": [
+    {
+      "id": "uuid",
+      "job_name": "nvd_ingestion",
+      "status": "success",
+      "started_at": "2026-07-10T06:00:00Z",
+      "finished_at": "2026-07-10T06:00:42Z",
+      "items_processed": 50,
+      "error_message": null,
+      "created_at": "2026-07-10T06:00:00Z"
+    }
+  ],
+  "total": 12,
+  "page": 1,
+  "page_size": 20,
+  "total_pages": 1
+}
+```
+
+`status` is one of `running`, `success`, `failed` (see
+`app/models/scrape_job.py`). `error_message` is populated only when
+`status` is `failed`, as a concise `"<ExceptionType>: <message>"` summary
+(not a full traceback).
+
+### `GET /api/v1/scrape-jobs/{scrape_job_id}`
+
+Returns `404 NotFoundError` if no job with that ID exists.
+
+**Response `200`** (`ScrapeJobRead`)
+
+---
+
 ## Vulnerabilities — `/api/v1/vulnerabilities`
 
 Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
@@ -325,6 +387,6 @@ job has processed it, and so on. Any unset field is `null`.
 ## Not yet available
 
 The following are referenced by directory/file names in the codebase but have
-no working routes yet: advisories, assets, scrape job status, and
-free-text/cross-entity search. See `docs/architecture.md` for the full list
-of scaffolded-but-empty modules.
+no working routes yet: advisories, assets, and free-text/cross-entity
+search. See `docs/architecture.md` for the full list of scaffolded-but-empty
+modules.
