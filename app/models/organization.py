@@ -6,6 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database.base import Base, TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
+    from app.models.asset import Asset
     from app.models.user import User
 
 
@@ -16,3 +17,4 @@ class Organization(UUIDMixin, TimestampMixin, Base):
     slug: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
 
     users: Mapped[list["User"]] = relationship(back_populates="organization")
+    assets: Mapped[list["Asset"]] = relationship(back_populates="organization")

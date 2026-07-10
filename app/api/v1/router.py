@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints.advisories import router as advisories_router
+from app.api.v1.endpoints.assets import router as assets_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.organizations import router as organizations_router
 from app.api.v1.endpoints.roles import router as roles_router
@@ -17,4 +18,5 @@ api_router.include_router(roles_router)
 api_router.include_router(sources_router)
 api_router.include_router(scrape_jobs_router)
 api_router.include_router(advisories_router)
+api_router.include_router(assets_router)
 api_router.include_router(vulnerabilities_router)

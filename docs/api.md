@@ -1,10 +1,9 @@
 # ETIP API Reference
 
-All routes below are implemented and mounted today. Two endpoint modules
-(`assets`, `search`) still exist as empty files under
-`app/api/v1/endpoints/` and are not wired into the router yet — they are not
-documented here since they return nothing (they don't exist as routes at
-all).
+All routes below are implemented and mounted today. One endpoint module
+(`search`) still exists as an empty file under `app/api/v1/endpoints/` and
+is not wired into the router yet — it is not documented here since it
+returns nothing (it doesn't exist as a route at all).
 
 Base URL: `/api/v1` (from `settings.API_V1_PREFIX`), plus one unversioned
 route (`/health`).
@@ -386,6 +385,75 @@ with that ID exists.
 
 ---
 
+## Assets — `/api/v1/assets`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth.
+**Tenant-scoped** — unlike `sources`/`advisories`/`roles` (which are global
+reference data), an `Asset` belongs to exactly one organization, and every
+route here only ever operates on the requesting user's own
+`organization_id`. There's no cross-tenant listing endpoint, even for
+superusers.
+
+An `Asset` represents a piece of IT infrastructure the organization wants
+to track (a server, workstation, application, network device, etc.) —
+`vendor`/`product`/`version` mirror `Vulnerability.affected_vendor`/
+`affected_product`, intended for eventually matching assets against known
+vulnerabilities (not implemented yet).
+
+### `POST /api/v1/assets`
+
+Requires the `assets:manage` permission (or superuser). `organization_id`
+is never accepted in the request body — it's always taken from the
+requesting user, so a user can't create an asset in another organization.
+
+**Request body** (`AssetCreate`)
+```json
+{
+  "name": "prod-web-01",
+  "asset_type": "server",
+  "vendor": "Acme",
+  "product": "Widget Server",
+  "version": "2.4.49",
+  "ip_address": "10.0.0.5"
+}
+```
+
+**Response `201`** (`AssetRead`)
+```json
+{
+  "id": "uuid",
+  "name": "prod-web-01",
+  "asset_type": "server",
+  "vendor": "Acme",
+  "product": "Widget Server",
+  "version": "2.4.49",
+  "ip_address": "10.0.0.5",
+  "is_active": true,
+  "organization_id": "uuid",
+  "created_at": "2026-07-10T00:00:00Z"
+}
+```
+
+### `GET /api/v1/assets`
+
+Requires the `assets:read` permission (or superuser). Paginated, ordered
+by `name`. Only ever returns assets belonging to the requesting user's own
+organization.
+
+**Response `200`**: `Page[AssetRead]`
+
+### `GET /api/v1/assets/{asset_id}`
+
+Requires the `assets:read` permission (or superuser). Returns
+`404 NotFoundError` both when the asset doesn't exist **and** when it
+belongs to a different organization — the two cases are deliberately
+indistinguishable, so a user can't use this endpoint to probe which asset
+IDs exist in other tenants.
+
+**Response `200`** (`AssetRead`)
+
+---
+
 ## Vulnerabilities — `/api/v1/vulnerabilities`
 
 Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
@@ -462,6 +530,6 @@ job has processed it, and so on. Any unset field is `null`.
 
 ## Not yet available
 
-The following are referenced by directory/file names in the codebase but have
-no working routes yet: assets and free-text/cross-entity search. See
+Free-text/cross-entity search (`search.py`) is referenced by directory/file
+name in the codebase but has no working route yet. See
 `docs/architecture.md` for the full list of scaffolded-but-empty modules.

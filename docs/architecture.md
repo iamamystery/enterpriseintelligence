@@ -205,9 +205,9 @@ nothing prunes old rows.
 
 ## API surface
 
-`app/api/v1/router.py` wires up eight of the ten endpoint modules today —
+`app/api/v1/router.py` wires up nine of the ten endpoint modules today —
 `auth`, `users`, `organizations`, `roles`, `sources`, `scrape_jobs`,
-`advisories`, and `vulnerabilities`:
+`advisories`, `assets`, and `vulnerabilities`:
 
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
 - `POST /api/v1/users` (admin-only, requires `users:manage`)
@@ -219,14 +219,15 @@ nothing prunes old rows.
   (require `scrape_jobs:read`)
 - `POST /api/v1/advisories`, `GET /api/v1/advisories`,
   `GET /api/v1/advisories/{advisory_id}` (require `advisories:manage`/`advisories:read`)
+- `POST /api/v1/assets`, `GET /api/v1/assets`, `GET /api/v1/assets/{asset_id}`
+  (require `assets:manage`/`assets:read`, tenant-scoped to the caller's own organization)
 - `GET /api/v1/vulnerabilities`, `GET /api/v1/vulnerabilities/{cve_id}`
   (require `vulnerabilities:read`)
 - `GET /health` (unversioned, defined directly in `app/main.py`)
 
-`assets.py` and `search.py` under `app/api/v1/endpoints/` are still empty
-and not mounted — their backing models/schemas/repositories/services are
-mostly empty scaffolding too. See `docs/api.md` for the current route
-reference.
+`search.py` under `app/api/v1/endpoints/` is still empty and not mounted —
+its backing service is mostly empty scaffolding too. See `docs/api.md` for
+the current route reference.
 
 Unlike `sources`/`scrape_jobs`, nothing populates `advisories`
 automatically yet — it's a resource layer only (create/list/get), with
@@ -235,15 +236,23 @@ rows appearing only via `POST /api/v1/advisories`. The CISA advisory feed
 scraper to eventually auto-populate it, mirroring how `ScrapingService`
 populates `vulnerabilities`.
 
+`Asset` is the first genuinely tenant-scoped resource in the API —
+`Organization`, `Role`, `Source`, `Vulnerability`, `Advisory`, and
+`ScrapeJob` are all either global reference data or single "my own"
+lookups (`organizations/me`). Every asset route filters by the requesting
+user's `organization_id`, and `GET /api/v1/assets/{asset_id}` returns
+`404` (not `403`) for an asset belonging to another organization, so the
+error response can't be used to enumerate other tenants' asset IDs.
+
 Note that `Role` is a global table with no `organization_id` — creating a
 role via `POST /api/v1/roles` affects every organization in the system, not
 just the caller's own. See `docs/security.md` for the implication of this.
 
 ## Data model
 
-Seven models are registered with SQLAlchemy today (`app/models/__init__.py`):
+Eight models are registered with SQLAlchemy today (`app/models/__init__.py`):
 `Organization`, `Role`, `User`, `Source`, `Vulnerability`, `ScrapeJob`,
-`Advisory`. All use a shared `UUIDMixin` (UUID primary key) and
+`Advisory`, `Asset`. All use a shared `UUIDMixin` (UUID primary key) and
 `TimestampMixin` (`created_at`/`updated_at`) from `app/database/base.py`.
 `Vulnerability` is deliberately a single wide table that accumulates
 enrichment columns from each source (KEV fields, MITRE metadata, Red Hat
@@ -255,9 +264,13 @@ scheduled ingestion job (`job_name`, `status`, `started_at`/`finished_at`,
 `title`, `summary`, `url`, `published_date`, a plain `cve_ids: list[str]`
 rather than a join table, and a `source_id` FK) — distinct from
 `Vulnerability`, which is a single enriched CVE record; one advisory can
-span multiple CVEs. `Asset` and `AuditLog` model files exist but are empty;
-no tables for them exist in the migration history. Full schema in
-`docs/database.md`.
+span multiple CVEs. `Asset` represents a piece of tracked IT infrastructure
+(`name`, `asset_type`, `vendor`/`product`/`version`, `ip_address`,
+`is_active`) belonging to exactly one `Organization` — `vendor`/`product`
+mirror `Vulnerability.affected_vendor`/`affected_product` naming, intended
+for future asset-to-vulnerability matching (not implemented yet).
+`AuditLog` model file exists but is empty; no table for it exists in the
+migration history. Full schema in `docs/database.md`.
 
 ## What's implemented vs. scaffolded
 
@@ -265,20 +278,19 @@ no tables for them exist in the migration history. Full schema in
 authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
 four scraper integrations orchestrated by `ScrapingService`, four scheduled
 ingestion jobs with tracked run history, vulnerability list/search/get
-endpoints, organization/role/source/scrape-job/advisory endpoints (create +
-read, except organizations which is read-only), seven Alembic migrations,
-Docker Compose deployment.
+endpoints, organization/role/source/scrape-job/advisory/asset endpoints
+(create + read, except organizations which is read-only), eight Alembic
+migrations, Docker Compose deployment.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
-middleware (request ID, request logging, error handling), the `asset` and
-`search` services, the `asset` and `audit` repositories, the generic scraper
-base pipeline (cleaner, deduplicator, normalizer, parser, base_scraper), a
-CISA advisory-feed scraper to auto-populate `advisories` (currently
-create-only via the API), Celery integration, cleanup jobs (so
-`scrape_jobs` history grows unbounded), the `assets`/`search` API endpoint
-modules and their schemas, the `Asset`/`AuditLog` models, and several
-utility modules (`filters.py`, `retry.py`, `search.py`, `timezone.py`,
-`validators.py`).
+middleware (request ID, request logging, error handling), the `search`
+service, the `audit` repository, the generic scraper base pipeline
+(cleaner, deduplicator, normalizer, parser, base_scraper), a CISA
+advisory-feed scraper to auto-populate `advisories` (currently create-only
+via the API), asset-to-vulnerability matching, Celery integration, cleanup
+jobs (so `scrape_jobs` history grows unbounded), the `search` API endpoint
+module and its schema, the `AuditLog` model, and several utility modules
+(`filters.py`, `retry.py`, `search.py`, `timezone.py`, `validators.py`).
 
 When extending ETIP, treat an existing-but-empty file as an intentional
 placeholder for where that logic belongs, not as dead code to remove.
