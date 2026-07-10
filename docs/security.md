@@ -160,10 +160,13 @@ an appropriate status code by a single handler
 (`"Invalid email or password"`, `"User account is disabled"`) are
 deliberately generic and don't distinguish "no such user" from "wrong
 password", which avoids leaking whether a given email is registered.
-Uncaught exceptions are not currently caught by a catch-all handler, so they
-fall through to FastAPI/Starlette's default 500 response — in `DEBUG` mode
-this can include a full traceback; `DEBUG` should always be `false` outside
-local development.
+Uncaught exceptions are now caught by `ErrorHandlingMiddleware`
+(`app/core/middleware/error_handling.py`), which logs the exception (with
+traceback, via the `app.error` logger) and returns a generic
+`{"detail": "Internal server error"}` 500 — no exception type, message, or
+traceback is ever included in the response body, regardless of `DEBUG`. See
+`docs/architecture.md` ("Custom middleware") for how this composes with the
+existing `ETIPError` handler.
 
 ## Secrets and environment
 

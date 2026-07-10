@@ -9,6 +9,7 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging
+from app.core.middleware import ErrorHandlingMiddleware, RequestIDMiddleware, RequestLoggingMiddleware
 from app.tasks.scheduler import shutdown_scheduler, start_scheduler
 
 configure_logging()
@@ -23,6 +24,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
 app = FastAPI(title=settings.APP_NAME, version=settings.APP_VERSION, lifespan=lifespan)
 
+# Starlette wraps middleware in reverse add-order (last added = outermost),
+# so this list runs, on the way in: CORS -> RequestID -> RequestLogging ->
+# ErrorHandling -> router, and unwinds in reverse on the way out. CORS stays
+# outermost so its headers land on every response, including error ones.
+# ErrorHandling sits innermost (closest to the router) so it only ever sees
+# exceptions that ETIPError's own handler didn't already convert to a
+# response - see app/core/exception_handlers.py.
+app.add_middleware(ErrorHandlingMiddleware)
+app.add_middleware(RequestLoggingMiddleware)
+app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,

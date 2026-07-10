@@ -28,6 +28,9 @@ exists.
 ```
 client
   -> CORSMiddleware (app/main.py)
+  -> RequestIDMiddleware (app/core/middleware/request_id.py)
+  -> RequestLoggingMiddleware (app/core/middleware/request_logging.py)
+  -> ErrorHandlingMiddleware (app/core/middleware/error_handling.py)
   -> APIRouter (app/api/v1/router.py)
       -> per-router rate-limit dependency (auth_rate_limit / rate_limit)
       -> auth dependency (get_current_user, decodes JWT)
@@ -39,17 +42,42 @@ client
   -> ETIPError / HTTPException -> JSON error response
 ```
 
-`app/main.py` builds the `FastAPI` app, registers `CORSMiddleware`, calls
+`app/main.py` builds the `FastAPI` app, registers `CORSMiddleware` plus the
+three `app/core/middleware/` middlewares (see below), calls
 `register_exception_handlers`, mounts `api_router` under `settings.API_V1_PREFIX`,
 and defines `GET /health` directly (this route is unversioned and lives outside
 the `/api/v1` router). A `lifespan` context manager starts/stops the APScheduler
 instance alongside the app process.
 
-There is currently **no custom middleware** beyond CORS — `app/core/middleware/`
-(request ID, request logging, error-handling middleware) exists as empty stub
-files. Rate limiting is implemented as a FastAPI dependency, not middleware (see
-below), and request/response logging is limited to whatever `logging.dictConfig`
-setup is in `app/core/logging.py`.
+## Custom middleware
+
+`app/core/middleware/` holds three `starlette.middleware.base.BaseHTTPMiddleware`
+subclasses, registered in `app/main.py` via `add_middleware`. Starlette wraps
+middleware in reverse add-order (the last one added ends up outermost), so
+they're added in this order: `ErrorHandlingMiddleware`, `RequestLoggingMiddleware`,
+`RequestIDMiddleware`, `CORSMiddleware` — which makes CORS outermost (so its
+headers land on every response, including error ones) and `ErrorHandlingMiddleware`
+innermost, right next to the router:
+
+- **`RequestIDMiddleware`** reads an incoming `X-Request-ID` header if present
+  and looks like a safe opaque token (`^[A-Za-z0-9._-]{1,128}$`), otherwise
+  generates a `uuid4`. Stores it on `request.state.request_id` and echoes it
+  back as a response header, so it's available to logging/error-handling
+  middleware and to the client for correlating a report with server logs.
+- **`RequestLoggingMiddleware`** logs one line per request via the
+  `app.request` logger — method, path, status code, duration in ms, and
+  `request_id` — after the response (or a 500, via the `finally` block) is
+  known.
+- **`ErrorHandlingMiddleware`** catches any exception that reaches it
+  unhandled, logs it (with traceback, via the `app.error` logger) and returns
+  a generic `{"detail": "Internal server error"}` 500. Because it sits
+  innermost, closest to the router, `ETIPError` and `HTTPException` are
+  already converted to responses by Starlette's `ExceptionMiddleware`
+  (registered via `register_exception_handlers`) before they ever reach this
+  layer — so it only ever sees genuinely unexpected exceptions, and never
+  shadows the existing `ETIPError` -> `{"detail": message}` contract.
+
+Rate limiting remains a FastAPI dependency, not middleware (see below).
 
 ## Layering
 
@@ -353,10 +381,11 @@ migration history. Full schema in `docs/database.md`.
 ## What's implemented vs. scaffolded
 
 **Working today**: config, JWT auth (register/login/refresh), permission-based
-authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
-four scraper integrations orchestrated by `ScrapingService`, four scheduled
-ingestion jobs with tracked run history, a scheduled `scrape_jobs` cleanup
-job (retention-based, finished rows only, see above), vulnerability
+authorization, in-memory rate limiting, CORS, custom middleware (request ID,
+request logging, catch-all error handling — see above), dual Postgres+Mongo
+wiring, the four scraper integrations orchestrated by `ScrapingService`, four
+scheduled ingestion jobs with tracked run history, a scheduled `scrape_jobs`
+cleanup job (retention-based, finished rows only, see above), vulnerability
 list/search/get endpoints, organization/role/source/scrape-job/advisory/
 asset endpoints (create + read, except organizations which is read-only),
 asset-to-vulnerability matching (exact case-insensitive vendor/product
@@ -365,9 +394,8 @@ advisories/assets (see above), eight Alembic migrations, Docker Compose
 deployment. Every API endpoint module is now wired in — nothing left in
 `app/api/v1/endpoints/` is an empty stub.
 
-**Scaffolded, not yet implemented** (empty files present, no logic): custom
-middleware (request ID, request logging, error handling), the `audit`
-repository, the generic scraper base pipeline (cleaner, deduplicator,
+**Scaffolded, not yet implemented** (empty files present, no logic): the
+`audit` repository, the generic scraper base pipeline (cleaner, deduplicator,
 normalizer, parser, base_scraper), a CISA advisory-feed scraper to
 auto-populate `advisories` (currently create-only via the API), Celery
 integration, a retention/cleanup policy for MongoDB's `raw_intel`
