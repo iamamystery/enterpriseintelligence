@@ -9,6 +9,7 @@ from app.api.dependencies.permissions import require_permission
 from app.api.dependencies.rate_limit import rate_limit
 from app.models.user import User
 from app.schemas.asset import AssetCreate, AssetRead
+from app.schemas.vulnerability import VulnerabilityRead
 from app.services.asset_service import AssetService
 from app.utils.pagination import Page
 
@@ -50,3 +51,21 @@ async def get_asset(
 ) -> AssetRead:
     asset = await AssetService(session).get_by_id(current_user, asset_id)
     return AssetRead.model_validate(asset)
+
+
+@router.get("/{asset_id}/vulnerabilities", response_model=Page[VulnerabilityRead])
+async def list_asset_vulnerabilities(
+    asset_id: uuid.UUID,
+    session: DBSession,
+    pagination: PaginationDep,
+    current_user: Annotated[User, Depends(require_permission("vulnerabilities:read"))],
+) -> Page[VulnerabilityRead]:
+    items, total = await AssetService(session).list_matching_vulnerabilities(
+        current_user, asset_id, limit=pagination.page_size, offset=pagination.offset
+    )
+    return Page.create(
+        items=[VulnerabilityRead.model_validate(item) for item in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )

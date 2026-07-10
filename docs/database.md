@@ -192,7 +192,11 @@ matching the APScheduler job IDs in `app/tasks/scheduler.py`, not a FK to
 a job-definitions table. `Advisory.cve_ids` is a plain string array, not a
 foreign key or join table — there is no enforced many-to-many between
 advisories and vulnerabilities (an advisory can reference a `cve_id` that
-doesn't exist, or doesn't exist yet, in `vulnerabilities`).
+doesn't exist, or doesn't exist yet, in `vulnerabilities`). Likewise,
+`Asset` and `Vulnerability` have no FK or join table between them at
+all — the asset-to-vulnerability matching feature (`docs/architecture.md`)
+is computed at query time by comparing `vendor`/`product` string columns
+on both tables, not by a stored relationship.
 
 One model file exists but defines no table and isn't imported anywhere
 (not part of any migration): `app/models/audit_log.py`. Treat it as a

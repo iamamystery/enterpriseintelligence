@@ -397,8 +397,8 @@ superusers.
 An `Asset` represents a piece of IT infrastructure the organization wants
 to track (a server, workstation, application, network device, etc.) —
 `vendor`/`product`/`version` mirror `Vulnerability.affected_vendor`/
-`affected_product`, intended for eventually matching assets against known
-vulnerabilities (not implemented yet).
+`affected_product`. `GET /api/v1/assets/{asset_id}/vulnerabilities` below
+is the matching feature this was built for.
 
 ### `POST /api/v1/assets`
 
@@ -451,6 +451,24 @@ indistinguishable, so a user can't use this endpoint to probe which asset
 IDs exist in other tenants.
 
 **Response `200`** (`AssetRead`)
+
+### `GET /api/v1/assets/{asset_id}/vulnerabilities`
+
+Requires the `vulnerabilities:read` permission (or superuser) — note this
+is a *different* permission than the other `/assets/*` routes, since the
+response payload is `Vulnerability` data, not `Asset` data. Returns
+`404 NotFoundError` under the same rules as `GET /assets/{asset_id}` (asset
+doesn't exist, or belongs to another organization).
+
+Matches by exact, case-insensitive equality on `vendor` and `product`
+against `Vulnerability.affected_vendor`/`affected_product` — **not** a
+substring/fuzzy match, and it doesn't consider `Asset.version` at all
+(vulnerabilities aren't tracked with structured affected-version ranges).
+If the asset has no `vendor` or no `product` set, this always returns an
+empty page without querying. See `docs/architecture.md` for the exact
+matching rule and its known limitations.
+
+**Response `200`**: `Page[VulnerabilityRead]`
 
 ---
 
@@ -525,6 +543,21 @@ Fetch a single vulnerability by its CVE ID (e.g. `CVE-2024-12345`). Returns
 Fields populated depend on which sources have enriched that CVE — KEV fields
 are only set if CISA has flagged it, MITRE fields only if the MITRE backfill
 job has processed it, and so on. Any unset field is `null`.
+
+### `GET /api/v1/vulnerabilities/{cve_id}/assets`
+
+The inverse of `GET /assets/{asset_id}/vulnerabilities`: "which of my
+assets are exposed to this CVE." Requires the `assets:read` permission (or
+superuser) — a *different* permission than the other `/vulnerabilities/*`
+routes, since the response payload is `Asset` data. Automatically scoped
+to the requesting user's own organization (there's no way to see another
+organization's assets through this route, regardless of permissions).
+Returns `404 NotFoundError` if the CVE doesn't exist. Same exact,
+case-insensitive vendor/product matching rule as the asset-side route
+above; returns an empty page if the vulnerability has no
+`affected_vendor`/`affected_product` set.
+
+**Response `200`**: `Page[AssetRead]`
 
 ---
 

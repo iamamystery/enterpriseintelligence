@@ -7,6 +7,7 @@ from app.api.dependencies.pagination import PaginationDep
 from app.api.dependencies.permissions import require_permission
 from app.api.dependencies.rate_limit import rate_limit
 from app.models.user import User
+from app.schemas.asset import AssetRead
 from app.schemas.vulnerability import VulnerabilityRead
 from app.services.vulnerability_service import VulnerabilityService
 from app.utils.pagination import Page
@@ -64,3 +65,21 @@ async def get_vulnerability(
 ) -> VulnerabilityRead:
     vulnerability = await VulnerabilityService(session).get_by_cve_id(cve_id)
     return VulnerabilityRead.model_validate(vulnerability)
+
+
+@router.get("/{cve_id}/assets", response_model=Page[AssetRead])
+async def list_vulnerability_assets(
+    cve_id: str,
+    session: DBSession,
+    pagination: PaginationDep,
+    current_user: Annotated[User, Depends(require_permission("assets:read"))],
+) -> Page[AssetRead]:
+    items, total = await VulnerabilityService(session).list_matching_assets(
+        current_user, cve_id, limit=pagination.page_size, offset=pagination.offset
+    )
+    return Page.create(
+        items=[AssetRead.model_validate(item) for item in items],
+        total=total,
+        page=pagination.page,
+        page_size=pagination.page_size,
+    )

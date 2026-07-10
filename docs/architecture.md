@@ -221,6 +221,9 @@ nothing prunes old rows.
   `GET /api/v1/advisories/{advisory_id}` (require `advisories:manage`/`advisories:read`)
 - `POST /api/v1/assets`, `GET /api/v1/assets`, `GET /api/v1/assets/{asset_id}`
   (require `assets:manage`/`assets:read`, tenant-scoped to the caller's own organization)
+- `GET /api/v1/assets/{asset_id}/vulnerabilities` (requires `vulnerabilities:read`)
+  and `GET /api/v1/vulnerabilities/{cve_id}/assets` (requires `assets:read`) — the
+  asset-to-vulnerability matching endpoints, see below
 - `GET /api/v1/vulnerabilities`, `GET /api/v1/vulnerabilities/{cve_id}`
   (require `vulnerabilities:read`)
 - `GET /health` (unversioned, defined directly in `app/main.py`)
@@ -248,6 +251,31 @@ Note that `Role` is a global table with no `organization_id` — creating a
 role via `POST /api/v1/roles` affects every organization in the system, not
 just the caller's own. See `docs/security.md` for the implication of this.
 
+## Asset-to-vulnerability matching
+
+`AssetService.list_matching_vulnerabilities` and
+`VulnerabilityService.list_matching_assets` are inverses of the same
+underlying query, computed on the fly (nothing is precomputed or cached):
+`VulnerabilityRepository.list_matching_vendor_product` and
+`AssetRepository.list_matching_vendor_product` both filter on
+`func.lower(vendor) == vendor.lower() AND func.lower(product) ==
+product.lower()` — exact, case-insensitive equality on both fields, not a
+substring/fuzzy match. If either side is missing `vendor` or `product`,
+the service short-circuits to an empty result without querying.
+
+This is a deliberately naive first pass, not real CPE/vendor-alias
+matching: real-world vendor/product strings from different sources are
+inconsistent (e.g. NVD might record `"Apache Software Foundation"` /
+`"Log4j2"` while an asset entry says `"Apache"` / `"log4j"`), and nothing
+here normalizes or aliases across those variants. It also never looks at
+`Asset.version` — `Vulnerability` has no structured affected-version-range
+field to compare against, only the free-text `affected_vendor`/
+`affected_product`. In practice this means false negatives (a real match
+missed due to naming differences) are more likely than false positives.
+Improving this would mean either normalizing vendor/product strings at
+ingestion time or introducing a CPE-based matching scheme — out of scope
+for the current implementation.
+
 ## Data model
 
 Eight models are registered with SQLAlchemy today (`app/models/__init__.py`):
@@ -267,8 +295,8 @@ rather than a join table, and a `source_id` FK) — distinct from
 span multiple CVEs. `Asset` represents a piece of tracked IT infrastructure
 (`name`, `asset_type`, `vendor`/`product`/`version`, `ip_address`,
 `is_active`) belonging to exactly one `Organization` — `vendor`/`product`
-mirror `Vulnerability.affected_vendor`/`affected_product` naming, intended
-for future asset-to-vulnerability matching (not implemented yet).
+mirror `Vulnerability.affected_vendor`/`affected_product` naming, and are
+what the asset-to-vulnerability matching endpoints (above) query against.
 `AuditLog` model file exists but is empty; no table for it exists in the
 migration history. Full schema in `docs/database.md`.
 
@@ -279,18 +307,19 @@ authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
 four scraper integrations orchestrated by `ScrapingService`, four scheduled
 ingestion jobs with tracked run history, vulnerability list/search/get
 endpoints, organization/role/source/scrape-job/advisory/asset endpoints
-(create + read, except organizations which is read-only), eight Alembic
-migrations, Docker Compose deployment.
+(create + read, except organizations which is read-only), asset-to-
+vulnerability matching (exact case-insensitive vendor/product equality,
+see above), eight Alembic migrations, Docker Compose deployment.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
 middleware (request ID, request logging, error handling), the `search`
 service, the `audit` repository, the generic scraper base pipeline
 (cleaner, deduplicator, normalizer, parser, base_scraper), a CISA
 advisory-feed scraper to auto-populate `advisories` (currently create-only
-via the API), asset-to-vulnerability matching, Celery integration, cleanup
-jobs (so `scrape_jobs` history grows unbounded), the `search` API endpoint
-module and its schema, the `AuditLog` model, and several utility modules
-(`filters.py`, `retry.py`, `search.py`, `timezone.py`, `validators.py`).
+via the API), Celery integration, cleanup jobs (so `scrape_jobs` history
+grows unbounded), the `search` API endpoint module and its schema, the
+`AuditLog` model, and several utility modules (`filters.py`, `retry.py`,
+`search.py`, `timezone.py`, `validators.py`).
 
 When extending ETIP, treat an existing-but-empty file as an intentional
 placeholder for where that logic belongs, not as dead code to remove.
