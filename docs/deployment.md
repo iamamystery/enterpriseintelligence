@@ -33,6 +33,7 @@ defined in `app/core/config.py` (`Settings`, loaded via `pydantic-settings`).
 | `NVD_API_KEY` | none | optional; raises NVD's rate limit if set |
 | `SCRAPER_REQUEST_TIMEOUT` | `30` | seconds |
 | `SCRAPER_USER_AGENT` | `ETIP-Bot/1.0` | sent on all outbound scraper requests |
+| `SCRAPE_JOB_RETENTION_DAYS` | `90` | finished `scrape_jobs` rows older than this are deleted daily; see `docs/architecture.md` "Background jobs" |
 
 `DATABASE_URL` (asyncpg) and `SYNC_DATABASE_URL` (psycopg2, used by Alembic)
 are computed automatically from the `POSTGRES_*` fields — don't set them

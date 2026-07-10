@@ -1,5 +1,5 @@
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -48,3 +48,9 @@ class ScrapeJobService:
         if job is None:
             raise NotFoundError(f"Scrape job '{scrape_job_id}' not found")
         return job
+
+    async def delete_finished_older_than(self, days: int) -> int:
+        cutoff = datetime.now(UTC) - timedelta(days=days)
+        deleted = await self.scrape_jobs.delete_finished_older_than(cutoff)
+        await self.session.commit()
+        return deleted

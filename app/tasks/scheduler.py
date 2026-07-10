@@ -3,6 +3,7 @@ import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app.tasks.cleanup_tasks import run_scrape_job_cleanup
 from app.tasks.scrape_tasks import (
     run_cisa_kev_ingestion,
     run_mitre_backfill,
@@ -41,6 +42,13 @@ def configure_scheduler() -> None:
         run_mitre_backfill,
         trigger=IntervalTrigger(hours=12),
         id="mitre_backfill",
+        replace_existing=True,
+        max_instances=1,
+    )
+    scheduler.add_job(
+        run_scrape_job_cleanup,
+        trigger=IntervalTrigger(hours=24),
+        id="scrape_job_cleanup",
         replace_existing=True,
         max_instances=1,
     )

@@ -256,7 +256,11 @@ wrappers — no shared base repository class):
     one
 - `ScrapeJobRepository` — `create`, `get_by_id`,
   `list_recent(job_name=None, limit, offset) -> (items, total_count)`
-  (ordered `started_at` descending)
+  (ordered `started_at` descending),
+  `delete_finished_older_than(cutoff) -> deleted_count` — only deletes rows
+  with `finished_at IS NOT NULL AND finished_at < cutoff`; a stuck
+  `status="running"` row is never deleted regardless of age, since that's
+  a diagnostic signal (the process died mid-run), not stale data
 - `AdvisoryRepository` — `create`, `get_by_id` (internal UUID),
   `get_by_advisory_id` (external string ID, used by the API detail route),
   `list_recent(source_id=None, limit, offset) -> (items, total_count)`

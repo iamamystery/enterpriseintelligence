@@ -186,22 +186,37 @@ exceptions so one failing job doesn't crash the scheduler
 | `cisa_kev_ingestion` | 2h | `ingest_cisa_kev` |
 | `redhat_ingestion` | 6h | `ingest_redhat_recent` |
 | `mitre_backfill` | 12h | `ingest_mitre_cves` for CVEs missing MITRE enrichment |
+| `scrape_job_cleanup` | 24h | `run_scrape_job_cleanup` (`app/tasks/cleanup_tasks.py`), see below |
 
-Each run is tracked in the `scrape_jobs` table via a shared `_run_tracked`
-helper: it inserts a `ScrapeJob` row with `status="running"` before calling
-the ingestion function, then updates it to `"success"` (with
-`items_processed`) or `"failed"` (with a concise `error_message`) in a
-separate DB session — separate so the tracking write survives even if the
-ingestion's own session/transaction is the thing that failed. This is what
-`GET /api/v1/scrape-jobs` (see `docs/api.md`) exposes; before this existed,
-a failing scraper was only visible in application logs, not queryable via
-the API.
+Each ingestion run is tracked in the `scrape_jobs` table via a shared
+`_run_tracked` helper: it inserts a `ScrapeJob` row with `status="running"`
+before calling the ingestion function, then updates it to `"success"`
+(with `items_processed`) or `"failed"` (with a concise `error_message`) in
+a separate DB session — separate so the tracking write survives even if
+the ingestion's own session/transaction is the thing that failed. This is
+what `GET /api/v1/scrape-jobs` (see `docs/api.md`) exposes; before this
+existed, a failing scraper was only visible in application logs, not
+queryable via the API.
+
+**Cleanup**: `run_scrape_job_cleanup` (`app/tasks/cleanup_tasks.py`) runs
+once every 24 hours and deletes `scrape_jobs` rows where
+`finished_at < now() - SCRAPE_JOB_RETENTION_DAYS days` (default 90,
+configurable via the `SCRAPE_JOB_RETENTION_DAYS` env var). It deliberately
+only ever deletes **finished** rows (`status IN (success, failed)`) — a
+`status="running"` row that's older than the retention window is never
+touched, because that almost certainly means the process that owned it
+died mid-run without reaching `mark_success`/`mark_failed`, and a stuck
+`running` row is a useful signal that something went wrong, not noise to
+silently prune. Like the ingestion tasks, failures are caught and logged,
+not raised, so a broken cleanup run doesn't crash the scheduler. This is
+the only cleanup job implemented today — MongoDB's `raw_intel` collection
+(see below) still grows unbounded with no retention policy, since raw
+ingestion payloads are treated as an audit/replay log meant to be kept
+rather than pruned.
 
 Celery is scaffolded but unused: `app/tasks/celery_app.py` is empty, and no
 broker (Redis) is wired into `docker-compose.yml` or the dependency list — the
-`docker/redis/` directory exists but is empty. `cleanup_tasks.py` is likewise
-an empty stub — the `scrape_jobs` table currently grows unbounded, since
-nothing prunes old rows.
+`docker/redis/` directory exists but is empty.
 
 ## API surface
 
@@ -340,13 +355,14 @@ migration history. Full schema in `docs/database.md`.
 **Working today**: config, JWT auth (register/login/refresh), permission-based
 authorization, in-memory rate limiting, CORS, dual Postgres+Mongo wiring, the
 four scraper integrations orchestrated by `ScrapingService`, four scheduled
-ingestion jobs with tracked run history, vulnerability list/search/get
-endpoints, organization/role/source/scrape-job/advisory/asset endpoints
-(create + read, except organizations which is read-only), asset-to-
-vulnerability matching (exact case-insensitive vendor/product equality,
-see above), cross-entity keyword search over vulnerabilities/advisories/
-assets (see above), eight Alembic migrations, Docker Compose deployment.
-Every API endpoint module is now wired in — nothing left in
+ingestion jobs with tracked run history, a scheduled `scrape_jobs` cleanup
+job (retention-based, finished rows only, see above), vulnerability
+list/search/get endpoints, organization/role/source/scrape-job/advisory/
+asset endpoints (create + read, except organizations which is read-only),
+asset-to-vulnerability matching (exact case-insensitive vendor/product
+equality, see above), cross-entity keyword search over vulnerabilities/
+advisories/assets (see above), eight Alembic migrations, Docker Compose
+deployment. Every API endpoint module is now wired in — nothing left in
 `app/api/v1/endpoints/` is an empty stub.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
@@ -354,10 +370,12 @@ middleware (request ID, request logging, error handling), the `audit`
 repository, the generic scraper base pipeline (cleaner, deduplicator,
 normalizer, parser, base_scraper), a CISA advisory-feed scraper to
 auto-populate `advisories` (currently create-only via the API), Celery
-integration, cleanup jobs (so `scrape_jobs` history grows unbounded), the
-`AuditLog` model, and several utility modules (`filters.py`, `retry.py`,
-`utils/search.py` — note this is distinct from the now-implemented
-`services/search_service.py`, `timezone.py`, `validators.py`).
+integration, a retention/cleanup policy for MongoDB's `raw_intel`
+collection (which still grows unbounded — only `scrape_jobs` has cleanup
+today), the `AuditLog` model, and several utility modules (`filters.py`,
+`retry.py`, `utils/search.py` — note this is distinct from the
+now-implemented `services/search_service.py`, `timezone.py`,
+`validators.py`).
 
 When extending ETIP, treat an existing-but-empty file as an intentional
 placeholder for where that logic belongs, not as dead code to remove.

@@ -1,6 +1,7 @@
 import uuid
+from datetime import datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.scrape_job import ScrapeJob
@@ -42,3 +43,11 @@ class ScrapeJobRepository:
             .offset(offset)
         )
         return list(result.scalars().all()), total
+
+    async def delete_finished_older_than(self, cutoff: datetime) -> int:
+        result = await self.session.execute(
+            delete(ScrapeJob).where(
+                ScrapeJob.finished_at.is_not(None), ScrapeJob.finished_at < cutoff
+            )
+        )
+        return result.rowcount or 0

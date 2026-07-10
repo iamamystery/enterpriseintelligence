@@ -42,6 +42,8 @@ class Settings(BaseSettings):
     SCRAPER_REQUEST_TIMEOUT: int = 30
     SCRAPER_USER_AGENT: str = "ETIP-Bot/1.0"
 
+    SCRAPE_JOB_RETENTION_DAYS: int = 90
+
     @property
     def DATABASE_URL(self) -> str:
         return (
