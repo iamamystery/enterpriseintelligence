@@ -205,9 +205,9 @@ nothing prunes old rows.
 
 ## API surface
 
-`app/api/v1/router.py` wires up nine of the ten endpoint modules today —
-`auth`, `users`, `organizations`, `roles`, `sources`, `scrape_jobs`,
-`advisories`, `assets`, and `vulnerabilities`:
+`app/api/v1/router.py` wires up every endpoint module now — `auth`,
+`users`, `organizations`, `roles`, `sources`, `scrape_jobs`, `advisories`,
+`assets`, `search`, and `vulnerabilities`:
 
 - `POST /api/v1/auth/register`, `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`
 - `POST /api/v1/users` (admin-only, requires `users:manage`)
@@ -224,13 +224,15 @@ nothing prunes old rows.
 - `GET /api/v1/assets/{asset_id}/vulnerabilities` (requires `vulnerabilities:read`)
   and `GET /api/v1/vulnerabilities/{cve_id}/assets` (requires `assets:read`) — the
   asset-to-vulnerability matching endpoints, see below
+- `GET /api/v1/search` (requires `search:read`) — cross-entity keyword
+  search over vulnerabilities, advisories, and assets, see below
 - `GET /api/v1/vulnerabilities`, `GET /api/v1/vulnerabilities/{cve_id}`
   (require `vulnerabilities:read`)
 - `GET /health` (unversioned, defined directly in `app/main.py`)
 
-`search.py` under `app/api/v1/endpoints/` is still empty and not mounted —
-its backing service is mostly empty scaffolding too. See `docs/api.md` for
-the current route reference.
+Every `app/api/v1/endpoints/*.py` file is now mounted — there is no more
+scaffolded-but-empty endpoint module. See `docs/api.md` for the full route
+reference.
 
 Unlike `sources`/`scrape_jobs`, nothing populates `advisories`
 automatically yet — it's a resource layer only (create/list/get), with
@@ -276,6 +278,39 @@ Improving this would mean either normalizing vendor/product strings at
 ingestion time or introducing a CPE-based matching scheme — out of scope
 for the current implementation.
 
+## Cross-entity search
+
+`SearchService.search` (`app/services/search_service.py`) fans a single
+keyword query out to three repositories in parallel-in-spirit (sequential
+`await`s, not concurrent) — `VulnerabilityRepository.search`,
+`AdvisoryRepository.search`, `AssetRepository.search` — each doing its own
+ILIKE substring match over that entity's text columns
+(`cve_id`/`title`/`description` for vulnerabilities,
+`advisory_id`/`title`/`summary` for advisories, `name`/`vendor`/`product`
+for assets). Asset results are always filtered to the requesting user's
+`organization_id`, regardless of anything else — tenant isolation isn't
+optional here.
+
+This is deliberately *not* a unified/paginated result set: each entity
+type is capped at a fixed `limit` (default 10, max 50) with its own
+`total` count, returned as three separate groups rather than one
+interleaved, ranked list. There's no cross-type relevance ranking — a
+`total: 47` vulnerability match and a `total: 1` advisory match are simply
+two separate numbers, not merged or sorted against each other. This
+matches the intended use case (a quick "does anything mention this"
+lookup) rather than being a full search engine; anyone wanting to browse
+all matches of one type should use that resource's own paginated list
+endpoint instead.
+
+`search:read` is a permission distinct from `vulnerabilities:read`,
+`advisories:read`, and `assets:read` — a user granted only `search:read`
+can see matches from all three types via this endpoint even without those
+other permissions. This is an intentional simplification (single gate,
+matching the one-permission-per-endpoint convention used everywhere else
+in this codebase) rather than per-type permission filtering within a
+single response, which would add real complexity for a coarse-grained
+convenience endpoint. See `docs/security.md` for the implication.
+
 ## Data model
 
 Eight models are registered with SQLAlchemy today (`app/models/__init__.py`):
@@ -309,17 +344,20 @@ ingestion jobs with tracked run history, vulnerability list/search/get
 endpoints, organization/role/source/scrape-job/advisory/asset endpoints
 (create + read, except organizations which is read-only), asset-to-
 vulnerability matching (exact case-insensitive vendor/product equality,
-see above), eight Alembic migrations, Docker Compose deployment.
+see above), cross-entity keyword search over vulnerabilities/advisories/
+assets (see above), eight Alembic migrations, Docker Compose deployment.
+Every API endpoint module is now wired in — nothing left in
+`app/api/v1/endpoints/` is an empty stub.
 
 **Scaffolded, not yet implemented** (empty files present, no logic): custom
-middleware (request ID, request logging, error handling), the `search`
-service, the `audit` repository, the generic scraper base pipeline
-(cleaner, deduplicator, normalizer, parser, base_scraper), a CISA
-advisory-feed scraper to auto-populate `advisories` (currently create-only
-via the API), Celery integration, cleanup jobs (so `scrape_jobs` history
-grows unbounded), the `search` API endpoint module and its schema, the
+middleware (request ID, request logging, error handling), the `audit`
+repository, the generic scraper base pipeline (cleaner, deduplicator,
+normalizer, parser, base_scraper), a CISA advisory-feed scraper to
+auto-populate `advisories` (currently create-only via the API), Celery
+integration, cleanup jobs (so `scrape_jobs` history grows unbounded), the
 `AuditLog` model, and several utility modules (`filters.py`, `retry.py`,
-`search.py`, `timezone.py`, `validators.py`).
+`utils/search.py` — note this is distinct from the now-implemented
+`services/search_service.py`, `timezone.py`, `validators.py`).
 
 When extending ETIP, treat an existing-but-empty file as an intentional
 placeholder for where that logic belongs, not as dead code to remove.

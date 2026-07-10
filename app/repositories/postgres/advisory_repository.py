@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.advisory import Advisory
@@ -48,3 +48,28 @@ class AdvisoryRepository:
         await self.session.flush()
         await self.session.refresh(advisory)
         return advisory
+
+    async def search(
+        self, *, keyword: str, limit: int = 20, offset: int = 0
+    ) -> tuple[list[Advisory], int]:
+        pattern = f"%{keyword}%"
+        conditions = (
+            or_(
+                Advisory.advisory_id.ilike(pattern),
+                Advisory.title.ilike(pattern),
+                Advisory.summary.ilike(pattern),
+            ),
+        )
+
+        total = (
+            await self.session.execute(select(func.count()).select_from(Advisory).where(*conditions))
+        ).scalar_one()
+
+        result = await self.session.execute(
+            select(Advisory)
+            .where(*conditions)
+            .order_by(Advisory.published_date.desc().nulls_last())
+            .limit(limit)
+            .offset(offset)
+        )
+        return list(result.scalars().all()), total

@@ -1,9 +1,7 @@
 # ETIP API Reference
 
-All routes below are implemented and mounted today. One endpoint module
-(`search`) still exists as an empty file under `app/api/v1/endpoints/` and
-is not wired into the router yet — it is not documented here since it
-returns nothing (it doesn't exist as a route at all).
+All routes below are implemented and mounted today — every endpoint module
+under `app/api/v1/endpoints/` is now wired into the router.
 
 Base URL: `/api/v1` (from `settings.API_V1_PREFIX`), plus one unversioned
 route (`/health`).
@@ -472,6 +470,63 @@ matching rule and its known limitations.
 
 ---
 
+## Search — `/api/v1/search`
+
+Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires the
+`search:read` permission (or superuser) — a permission distinct from
+`vulnerabilities:read`/`advisories:read`/`assets:read`. A user granted only
+`search:read` sees matches from all three entity types regardless of
+whether they separately hold those other permissions; this is intentional
+(a coarser, standalone grant), not a bug — see `docs/security.md`.
+
+Unlike the paginated list endpoints, this is a quick cross-entity lookup,
+not a full browse: each entity type is capped at `limit` results (default
+10, max 50), with a `total` count so the client knows there's more, but
+there's no `page`/`offset` for search itself. If you need to page through
+all matches of one type, use that resource's own list endpoint (which
+already supports keyword search for vulnerabilities via `?q=`).
+
+### `GET /api/v1/search`
+
+**Query parameters**
+
+| Param | Type | Default | Notes |
+|---|---|---|---|
+| `q` | string | — | required, `min_length=1` |
+| `types` | string | all three | comma-separated subset of `vulnerability,advisory,asset`; unrecognized values are silently ignored |
+| `limit` | int | 10 | `ge=1, le=50`, applied per entity type |
+
+Matching is ILIKE substring search per type:
+- **vulnerability**: `cve_id`, `title`, `description`
+- **advisory**: `advisory_id`, `title`, `summary`
+- **asset**: `name`, `vendor`, `product` — always scoped to the requesting
+  user's own organization, regardless of the `search:read` grant
+
+**Response `200`** (`SearchResponse`)
+```json
+{
+  "query": "log4j",
+  "vulnerabilities": {
+    "items": [ /* VulnerabilityRead objects */ ],
+    "total": 1
+  },
+  "advisories": {
+    "items": [ /* AdvisoryRead objects */ ],
+    "total": 1
+  },
+  "assets": {
+    "items": [ /* AssetRead objects, own organization only */ ],
+    "total": 1
+  }
+}
+```
+
+If `types` excludes an entity type, that group is still present in the
+response with `items: []` and `total: 0` — the response shape is always
+the same three keys, so clients never need to check for key existence.
+
+---
+
 ## Vulnerabilities — `/api/v1/vulnerabilities`
 
 Rate limit: `RATE_LIMIT_PER_MINUTE` (default 60/min). Requires auth and the
@@ -558,11 +613,3 @@ above; returns an empty page if the vulnerability has no
 `affected_vendor`/`affected_product` set.
 
 **Response `200`**: `Page[AssetRead]`
-
----
-
-## Not yet available
-
-Free-text/cross-entity search (`search.py`) is referenced by directory/file
-name in the codebase but has no working route yet. See
-`docs/architecture.md` for the full list of scaffolded-but-empty modules.

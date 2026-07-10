@@ -246,19 +246,32 @@ wrappers — no shared base repository class):
     arbitrary-column SQL injection via the sort parameter
   - `list_cve_ids_missing_mitre_enrichment(limit=25)` — finds rows with
     `cve_state IS NULL`, used to drive the MITRE backfill job
+  - `list_matching_vendor_product(vendor, product, limit, offset) ->
+    (items, total_count)` — exact case-insensitive vendor+product match,
+    powers asset-to-vulnerability matching (`docs/architecture.md`)
   - `create` / `upsert` (upsert looks up by `cve_id`, overwrites mutable
     enrichment fields on the existing row or inserts a new one)
+  - the cross-entity `/api/v1/search` endpoint reuses this same `search()`
+    method (passing only `keyword`/`limit`), rather than adding a separate
+    one
 - `ScrapeJobRepository` — `create`, `get_by_id`,
   `list_recent(job_name=None, limit, offset) -> (items, total_count)`
   (ordered `started_at` descending)
 - `AdvisoryRepository` — `create`, `get_by_id` (internal UUID),
   `get_by_advisory_id` (external string ID, used by the API detail route),
   `list_recent(source_id=None, limit, offset) -> (items, total_count)`
-  (ordered `published_date` descending, nulls last)
+  (ordered `published_date` descending, nulls last),
+  `search(keyword, limit, offset) -> (items, total_count)` — ILIKE across
+  `advisory_id`/`title`/`summary`
 - `AssetRepository` — `create`, `get_by_id`,
   `list_for_organization(organization_id, limit, offset) -> (items, total_count)`
   (ordered by `name`; `organization_id` is a required, not optional,
-  filter — there's no method that lists across organizations)
+  filter — there's no method that lists across organizations),
+  `list_matching_vendor_product(organization_id, vendor, product, limit,
+  offset) -> (items, total_count)` — the asset-side half of
+  asset-to-vulnerability matching, also organization-scoped,
+  `search(organization_id, keyword, limit, offset) -> (items, total_count)`
+  — ILIKE across `name`/`vendor`/`product`, organization-scoped
 
 `audit_repository.py` exists but is empty — no code, since `AuditLog`'s
 backing table doesn't exist yet.

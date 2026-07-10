@@ -78,6 +78,23 @@ but it's worth fixing (e.g. scoping `Role` to an organization, or
 restricting `roles:manage` to a genuine superuser) before this is exposed
 to untrusted tenants.
 
+**`search:read` is a coarse, standalone permission.**
+`GET /api/v1/search` (`app/api/v1/endpoints/search.py`) returns matches
+across vulnerabilities, advisories, *and* assets in one response, but is
+gated by a single `search:read` permission — not by the individual
+`vulnerabilities:read`/`advisories:read`/`assets:read` permissions that
+gate those resources' own endpoints. A user granted `search:read` alone
+(without any of the other three) can still see vulnerability, advisory,
+and asset matches through search. This is a deliberate simplification
+(matching the one-permission-per-endpoint pattern used everywhere else)
+rather than per-type permission filtering within a single response. Asset
+results are still always scoped to the caller's own organization — that
+tenant boundary is enforced unconditionally, independent of any
+permission check — but if you want search access to strictly imply
+possessing the corresponding per-type read permission, that would need to
+be enforced explicitly (e.g. checking `current_user.role.permissions` per
+type before including that group in the response), which isn't done today.
+
 ## Registration flow: self-service registration only creates new organizations
 
 `AuthService.register` (`app/services/auth_service.py`) slugifies

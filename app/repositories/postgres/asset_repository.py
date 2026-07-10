@@ -1,6 +1,6 @@
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.asset import Asset
@@ -52,6 +52,28 @@ class AssetRepository:
             Asset.organization_id == organization_id,
             func.lower(Asset.vendor) == vendor.lower(),
             func.lower(Asset.product) == product.lower(),
+        )
+
+        total = (
+            await self.session.execute(select(func.count()).select_from(Asset).where(*conditions))
+        ).scalar_one()
+
+        result = await self.session.execute(
+            select(Asset).where(*conditions).order_by(Asset.name).limit(limit).offset(offset)
+        )
+        return list(result.scalars().all()), total
+
+    async def search(
+        self, organization_id: uuid.UUID, *, keyword: str, limit: int = 20, offset: int = 0
+    ) -> tuple[list[Asset], int]:
+        pattern = f"%{keyword}%"
+        conditions = (
+            Asset.organization_id == organization_id,
+            or_(
+                Asset.name.ilike(pattern),
+                Asset.vendor.ilike(pattern),
+                Asset.product.ilike(pattern),
+            ),
         )
 
         total = (
